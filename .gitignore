@@ -1,0 +1,154 @@
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyTorch相关
+*.pth
+*.pt
+checkpoint*.tar
+*.ckpt
+
+# 训练结果和实验数据
+experiments/
+logs/
+runs/
+outputs/
+results/
+checkpoints/
+tensorboard_logs/
+
+# 数据文件
+data/
+dataset/
+*.npy
+*.npz
+*.csv
+*.json
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# 图像和视频文件
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# 模型文件
+*.tflite
+*.onnx
+*.pb
+*.caffemodel
+*.prototxt
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 环境变量
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# 系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 配置文件（保留示例，忽略个人配置）
+config_local.yaml
+config_personal.yaml
+*.conf
+!config.yaml
+
+# 日志文件
+*.log
+*.out
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# CUDA相关
+*.cubin
+*.fatbin
+
+# 性能分析
+*.prof
+
+# 备份文件
+*.bak
+*.backup
+
+# 测试覆盖率
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# 文档生成
+docs/_build/
+.readthedocs.yml
+
+# 其他
+.vscode/settings.json
+.python-version

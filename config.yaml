@@ -1,0 +1,190 @@
+# 面部表情动态评估训练配置文件
+
+# 数据配置
+data:
+  # 数据根目录
+  root_dir: "/home/jun/picture/output"
+  # 预训练模型路径
+  face_blendshapes_model: "/home/jun/picture/extracted_models/face_blendshapes.tflite"
+  # 训练/验证集划分比例
+  train_ratio: 0.8
+  # 数据加载器设置
+  batch_size: 32
+  num_workers: 4
+  
+# 模型配置
+model:
+  # 光流模型配置
+  optical_flow:
+    input_size: [3, 112, 112]
+    backbone: "resnet18"
+    pretrained: true
+    output_dim: 2
+    dropout: 0.5
+  
+  # 关键点模型配置
+  landmark:
+    input_dim: 104  # 52 + 52 from two face_blendshapes models
+    hidden_dims: [256, 128, 64]
+    output_dim: 2
+    dropout: 0.3
+    activation: "relu"
+    # 使用Transformer架构
+    model_type: "transformer"
+    transformer:
+      num_heads: 8
+      num_layers: 3
+      dim_feedforward: 512
+      dropout: 0.1
+  
+  # 融合模型配置
+  fusion:
+    input_dim: 4    # 2 + 2 from optical flow and landmark models
+    hidden_dims: [16, 8]
+    output_dim: 2
+    dropout: 0.2
+    activation: "relu"
+
+# 训练配置
+training:
+  # 训练阶段配置
+  stages:
+    # 阶段1: 光流模型预训练
+    optical_flow_pretrain:
+      epochs: 50
+      learning_rate: 0.001
+      weight_decay: 0.0001
+      scheduler: "cosine"
+      warmup_epochs: 5
+      freeze_backbone: false
+      
+    # 阶段2a: 关键点全连接层训练
+    landmark_fc_train:
+      epochs: 20
+      learning_rate: 0.001        # 较高学习率训练FC层
+      weight_decay: 0.0001
+      scheduler: "step"
+      step_size: 8
+      gamma: 0.5
+      freeze_tflite: true        # 冻结TFLite特征提取器
+      
+    # 阶段2b: 关键点模型微调
+    landmark_finetune:
+      epochs: 20
+      learning_rate: 0.0001       # 较低学习率微调整个路径
+      weight_decay: 0.00001
+      scheduler: "cosine"
+      freeze_tflite: false       # 解冻TFLite进行端到端微调
+      
+    # 阶段3: 融合模型训练
+    fusion_train:
+      epochs: 30
+      learning_rate: 0.01
+      weight_decay: 0.0001
+      scheduler: "cosine"
+      
+    # 阶段4: 端到端微调
+    end_to_end:
+      epochs: 50
+      learning_rate: 0.0001
+      weight_decay: 0.00001
+      scheduler: "cosine"
+      warmup_epochs: 3
+  
+  # 损失函数配置
+  loss:
+    type: "mse"  # 均方误差
+    weights: [1.0, 1.0]  # dynamics和synkinesis的权重
+    
+  # 优化器配置
+  optimizer:
+    type: "adam"
+    betas: [0.9, 0.999]
+    eps: 0.00000001
+    
+  # 早停配置
+  early_stopping:
+    patience: 10
+    min_delta: 0.001
+    monitor: "val_loss"
+    
+  # 检查点配置
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: "val_loss"
+    mode: "min"
+    load_best_after_training: true   # 每个阶段完成后是否自动加载最佳模型
+  
+  # 梯度监控配置
+  gradient_monitoring:
+    enabled: true                    # 是否启用梯度监控
+    check_frequency: 10              # 每N个batch检查一次
+    auto_fix: true                   # 是否自动修复梯度问题
+    vanishing_threshold: 1e-6        # 梯度消失阈值
+    exploding_threshold: 100.0       # 梯度爆炸阈值
+    clip_max_norm: 1.0              # 梯度裁剪的最大范数
+
+# 数据增强配置
+augmentation:
+  # 光流图像增强
+  optical_flow:
+    horizontal_flip: 0.5
+    rotation: 10
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+    
+  # 关键点增强
+  landmarks:
+    noise_std: 0.01  # 添加高斯噪声的标准差
+    scale_range: [0.95, 1.05]  # 缩放范围
+
+# 验证配置
+validation:
+  # 验证频率（每n个epoch验证一次）
+  frequency: 1
+  # 验证指标
+  metrics: ["mse", "mae", "accuracy"]
+  # 评分容忍度（用于计算准确率）
+  tolerance: 0.5
+
+# 日志和保存配置
+logging:
+  # 日志级别
+  level: "INFO"
+  # 保存目录
+  save_dir: "/home/jun/picture/train/experiments"
+  # 实验名称（如果为null则自动生成）
+  experiment_name: null
+  # 日志记录频率
+  log_frequency: 10
+  # 可视化配置
+  visualize:
+    enabled: true
+    frequency: 100  # 每n个batch可视化一次
+    save_images: true
+
+# 设备配置
+device:
+  # 使用的设备（cuda, cpu, auto）
+  type: "cuda"
+  # GPU设备ID（如果使用多GPU）
+  gpu_ids: [0]
+  
+# 随机种子
+seed: 42
+
+# 评估配置
+evaluation:
+  # 测试时使用的指标
+  metrics: ["mse", "mae", "pearson", "spearman"]
+  # 是否保存预测结果
+  save_predictions: true
+  # 是否生成混淆矩阵
+  confusion_matrix: true
+  # 评分范围
+  score_ranges:
+    dynamics: [0, 5]
+    synkinesis: [0, 3]
