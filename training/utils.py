@@ -159,7 +159,8 @@ class EarlyStopping:
     """早停机制"""
     
     def __init__(self, patience: int = 10, min_delta: float = 0.001, 
-                 monitor: str = 'val_loss', mode: str = 'min'):
+                 monitor: str = 'val_loss', mode: str = 'min',
+                 start_epoch: int = 0):
         """
         初始化早停机制
         
@@ -168,15 +169,18 @@ class EarlyStopping:
             min_delta: 最小改进量
             monitor: 监控指标
             mode: 监控模式（'min'或'max'）
+            start_epoch: 从第几个epoch开始启用早停机制
         """
         self.patience = patience
         self.min_delta = min_delta
         self.monitor = monitor
         self.mode = mode
+        self.start_epoch = start_epoch
         
         self.best_score = None
         self.counter = 0
         self.early_stop = False
+        self.current_epoch = 0
         
         self.compare = self._get_compare_fn()
     
@@ -187,16 +191,27 @@ class EarlyStopping:
         else:
             return lambda current, best: current > best + self.min_delta
     
-    def __call__(self, current_score: float) -> bool:
+    def __call__(self, current_score: float, epoch: int = None) -> bool:
         """
         检查是否应该早停
         
         Args:
             current_score: 当前分数
+            epoch: 当前epoch（可选，用于更精确的控制）
             
         Returns:
             是否应该早停
         """
+        # 更新当前epoch
+        if epoch is not None:
+            self.current_epoch = epoch
+        else:
+            self.current_epoch += 1
+        
+        # 如果还没到开始早停的epoch，直接返回False
+        if self.current_epoch < self.start_epoch:
+            return False
+        
         if self.best_score is None:
             self.best_score = current_score
         elif self.compare(current_score, self.best_score):
@@ -208,13 +223,21 @@ class EarlyStopping:
                 self.early_stop = True
         
         return self.early_stop
+    
+    def reset(self):
+        """重置早停状态"""
+        self.best_score = None
+        self.counter = 0
+        self.early_stop = False
+        self.current_epoch = 0
 
 
 class ModelCheckpoint:
     """模型检查点管理"""
     
     def __init__(self, save_dir: str, monitor: str = 'val_loss', 
-                 mode: str = 'min', save_best: bool = True, save_last: bool = True):
+                 mode: str = 'min', save_best: bool = True, save_last: bool = True,
+                 best_model_start_epoch: int = 0):
         """
         初始化检查点管理器
         
@@ -224,12 +247,14 @@ class ModelCheckpoint:
             mode: 监控模式
             save_best: 是否保存最佳模型
             save_last: 是否保存最后一个模型
+            best_model_start_epoch: 从第几个epoch后开始保存最佳模型
         """
         self.save_dir = save_dir
         self.monitor = monitor
         self.mode = mode
         self.save_best = save_best
         self.save_last = save_last
+        self.best_model_start_epoch = best_model_start_epoch
         
         self.best_score = None
         self.best_epoch = 0
@@ -265,8 +290,10 @@ class ModelCheckpoint:
             last_path = os.path.join(self.save_dir, 'last_checkpoint.pth')
             self._save_model(model, optimizer, scheduler, epoch, metrics, last_path)
         
-        # 保存最佳模型
-        if self.save_best and current_score is not None:
+        # 保存最佳模型（只有当epoch >= best_model_start_epoch时才开始保存）
+        if (self.save_best and current_score is not None and 
+            epoch >= self.best_model_start_epoch):
+            
             if self.best_score is None or self.compare(current_score, self.best_score):
                 self.best_score = current_score
                 self.best_epoch = epoch
@@ -275,6 +302,11 @@ class ModelCheckpoint:
                 self._save_model(model, optimizer, scheduler, epoch, metrics, best_path)
                 
                 print(f"保存最佳模型: epoch {epoch}, {self.monitor} = {current_score:.4f}")
+        elif self.save_best and epoch < self.best_model_start_epoch:
+            # 如果还没到开始保存最佳模型的epoch，显示提示信息
+            if epoch == 0:  # 只在第一个epoch显示一次提示
+                print(f"注意: 将从第 {self.best_model_start_epoch} 个epoch开始保存最佳模型")
+        
     
     def _save_model(self, model: nn.Module, optimizer: torch.optim.Optimizer,
                    scheduler: Optional[object], epoch: int, 

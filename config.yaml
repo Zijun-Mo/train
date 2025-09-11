@@ -53,6 +53,7 @@ training:
       scheduler: "cosine"
       warmup_epochs: 5
       freeze_backbone: false
+      best_model_start_epoch: 5      # 从第5个epoch开始保存最佳模型
       
     # 阶段2a: 关键点全连接层训练
     landmark_fc_train:
@@ -63,6 +64,7 @@ training:
       step_size: 8
       gamma: 0.5
       freeze_tflite: true        # 冻结TFLite特征提取器
+      best_model_start_epoch: 3  # 从第3个epoch开始保存最佳模型
       
     # 阶段2b: 关键点模型微调
     landmark_finetune:
@@ -71,6 +73,7 @@ training:
       weight_decay: 0.0001
       scheduler: "cosine"
       freeze_tflite: false       # 解冻TFLite进行端到端微调
+      best_model_start_epoch: 3  # 从第3个epoch开始保存最佳模型
       
     # 阶段3: 融合模型训练
     fusion_train:
@@ -78,6 +81,7 @@ training:
       learning_rate: 0.01
       weight_decay: 0.0001
       scheduler: "cosine"
+      best_model_start_epoch: 5  # 从第5个epoch开始保存最佳模型
       
     # 阶段4: 端到端微调
     end_to_end:
@@ -86,6 +90,7 @@ training:
       weight_decay: 0.00001
       scheduler: "cosine"
       warmup_epochs: 3
+      best_model_start_epoch: 10 # 从第10个epoch开始保存最佳模型
   
   # 损失函数配置
   loss:
@@ -110,6 +115,8 @@ training:
     patience: 10
     min_delta: 0.001
     monitor: "val_loss"
+    # 注意: start_epoch 会自动使用每个阶段的 best_model_start_epoch 值
+    # 这确保早停机制也从足够稳定的epoch开始工作
     
   # 检查点配置
   checkpoint:
@@ -118,6 +125,7 @@ training:
     monitor: "val_loss"
     mode: "min"
     load_best_after_training: true   # 每个阶段完成后是否自动加载最佳模型
+    best_model_start_epoch: 5        # 从第几个epoch后开始保存最佳模型（避免早期不稳定的模型被保存）
   
   # 梯度监控配置
   gradient_monitoring:

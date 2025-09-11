@@ -171,12 +171,12 @@ def generate_evaluation_report(config, trainer, logger):
         # 生成训练曲线图
         if config.get('logging.visualize.enabled', True):
             plot_path = os.path.join(config.get_experiment_dir(), 'training_curves.png')
-            plot_training_curves(trainer.train_history, trainer.val_history, plot_path)
+            plot_training_curves(trainer.train_history, trainer.val_history, plot_path, config)
             logger.info(f"训练曲线已保存: {plot_path}")
             
             # 生成分阶段loss图
             stage_plot_path = os.path.join(config.get_experiment_dir(), 'stage_losses.png')
-            plot_stage_losses(trainer.train_history, trainer.val_history, trainer.stage_history, stage_plot_path)
+            plot_stage_losses(trainer.train_history, trainer.val_history, trainer.stage_history, stage_plot_path, config)
             logger.info(f"分阶段损失曲线已保存: {stage_plot_path}")
         
         # 生成最终报告
@@ -189,7 +189,7 @@ def generate_evaluation_report(config, trainer, logger):
         logger.error(f"生成评估报告失败: {e}", exc_info=True)
 
 
-def plot_training_curves(train_history, val_history, save_path):
+def plot_training_curves(train_history, val_history, save_path, config):
     """绘制训练曲线"""
     try:
         import matplotlib.pyplot as plt
@@ -206,29 +206,61 @@ def plot_training_curves(train_history, val_history, save_path):
         val_accs = [h.get('overall_accuracy', 0) for h in val_history]
         
         # 创建图形
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
         
         # 损失曲线
-        ax1.plot(epochs, train_losses, 'b-', label='Train Loss')
-        ax1.plot(epochs, val_losses, 'r-', label='Val Loss')
-        ax1.set_title('Training and Validation Loss')
+        ax1.plot(epochs, train_losses, 'b-', label='Train Loss', linewidth=2)
+        ax1.plot(epochs, val_losses, 'r-', label='Val Loss', linewidth=2)
+        
+        # 标注每个阶段的延迟保存开始点
+        try:
+            stages_config = config.get('training', {}).get('stages', {})
+            global_best_start = config.get('training', {}).get('checkpoint', {}).get('best_model_start_epoch', 0)
+            
+            # 计算每个阶段的累积epoch
+            cumulative_epochs = 0
+            stage_colors = ['purple', 'green', 'blue', 'orange', 'brown']
+            
+            for i, (stage_name, stage_config) in enumerate(stages_config.items()):
+                stage_epochs = stage_config.get('epochs', 0)
+                best_start_epoch = stage_config.get('best_model_start_epoch', global_best_start)
+                
+                # 阶段内的best_start位置
+                actual_best_start = cumulative_epochs + best_start_epoch
+                
+                if actual_best_start < len(epochs) and best_start_epoch > 0:
+                    color = stage_colors[i % len(stage_colors)]
+                    ax1.axvline(x=actual_best_start, color=color, linestyle=':', alpha=0.7, linewidth=1.5)
+                    ax1.text(actual_best_start, ax1.get_ylim()[1] * (0.9 - i*0.1), 
+                            f'{stage_name}\nsave starts', 
+                            ha='center', va='top', fontsize=7, rotation=90,
+                            bbox=dict(boxstyle='round', facecolor=color, alpha=0.3))
+                
+                cumulative_epochs += stage_epochs
+                
+        except Exception as e:
+            print(f"Warning: Could not add stage markers to loss plot: {e}")
+        
+        ax1.set_title('Training and Validation Loss\n(with delayed save markers)', fontsize=12, fontweight='bold')
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
         ax1.legend()
-        ax1.grid(True)
+        ax1.grid(True, alpha=0.3)
         
         # 准确率曲线
-        ax2.plot(epochs, train_accs, 'b-', label='Train Accuracy')
-        ax2.plot(epochs, val_accs, 'r-', label='Val Accuracy')
-        ax2.set_title('Training and Validation Accuracy')
+        ax2.plot(epochs, train_accs, 'b-', label='Train Accuracy', linewidth=2)
+        ax2.plot(epochs, val_accs, 'r-', label='Val Accuracy', linewidth=2)
+        ax2.set_title('Training and Validation Accuracy', fontsize=12, fontweight='bold')
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('Accuracy')
         ax2.legend()
-        ax2.grid(True)
+        ax2.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
+        
+        print(f"Training curves with delayed save markers saved to: {save_path}")
         
     except ImportError:
         print("matplotlib不可用，跳过训练曲线绘制")
@@ -236,7 +268,7 @@ def plot_training_curves(train_history, val_history, save_path):
         print(f"绘制训练曲线失败: {e}")
 
 
-def plot_stage_losses(train_history, val_history, stage_history, save_path):
+def plot_stage_losses(train_history, val_history, stage_history, save_path, config):
     """绘制分阶段训练损失曲线"""
     try:
         import matplotlib.pyplot as plt
@@ -261,6 +293,15 @@ def plot_stage_losses(train_history, val_history, stage_history, save_path):
             'fusion_train': 'Stage 3: Fusion Training',
             'end_to_end': 'Stage 4: End-to-End Tuning'
         }
+        
+        # 从配置文件中获取每个阶段的best_model_start_epoch
+        stages_config = config.get('training', {}).get('stages', {})
+        global_best_start = config.get('training', {}).get('checkpoint', {}).get('best_model_start_epoch', 0)
+        
+        def get_stage_best_start_epoch(stage_name):
+            """获取指定阶段的best_model_start_epoch"""
+            stage_config = stages_config.get(stage_name, {})
+            return stage_config.get('best_model_start_epoch', global_best_start)
         
         # 绘制每个阶段
         for i, stage_info in enumerate(stage_history):
@@ -289,27 +330,80 @@ def plot_stage_losses(train_history, val_history, stage_history, save_path):
             ax.legend()
             ax.grid(True, alpha=0.3)
             
-            # 标注最佳验证损失
-            if stage_val_losses:
+            # 从配置文件获取该阶段的best_model_start_epoch
+            best_start_epoch = get_stage_best_start_epoch(stage_name)
+            
+            # 标注实际会保存的最佳模型点（考虑延迟保存）
+            if stage_val_losses and len(stage_val_losses) > best_start_epoch:
+                # 只在best_start_epoch之后的epoch中寻找最佳点
+                valid_losses = stage_val_losses[best_start_epoch:]
+                valid_epochs = relative_epochs[best_start_epoch:]
+                
+                if valid_losses:
+                    # 找到有效范围内的最小损失
+                    min_idx_in_valid = np.argmin(valid_losses)
+                    actual_best_epoch = valid_epochs[min_idx_in_valid]
+                    actual_best_loss = valid_losses[min_idx_in_valid]
+                    
+                    # 标注实际保存的最佳点
+                    ax.scatter(actual_best_epoch, actual_best_loss, color='red', s=80, zorder=5, 
+                              marker='*', edgecolors='darkred', linewidth=1)
+                    ax.annotate(f'Best Saved: {actual_best_loss:.4f}\n(epoch {actual_best_epoch})', 
+                               xy=(actual_best_epoch, actual_best_loss),
+                               xytext=(10, 15), textcoords='offset points',
+                               bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.8),
+                               fontsize=8, ha='left')
+                    
+                    # 如果best_start_epoch > 0，用灰色虚线标出延迟保存的开始点
+                    if best_start_epoch > 0:
+                        ax.axvline(x=best_start_epoch, color='gray', linestyle='--', alpha=0.7, linewidth=1)
+                        ax.text(best_start_epoch, ax.get_ylim()[1] * 0.9, 
+                               f'Save starts\n(epoch {best_start_epoch})', 
+                               ha='center', va='top', fontsize=7, 
+                               bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.7))
+                    
+                    # 如果延迟保存前有更小的损失点，用不同颜色标出（但注明不会保存）
+                    if best_start_epoch > 0:
+                        early_losses = stage_val_losses[:best_start_epoch]
+                        early_epochs = relative_epochs[:best_start_epoch]
+                        if early_losses:
+                            early_min_idx = np.argmin(early_losses)
+                            early_min_epoch = early_epochs[early_min_idx]
+                            early_min_loss = early_losses[early_min_idx]
+                            
+                            # 只在确实有更小损失时才标注
+                            if early_min_loss < actual_best_loss:
+                                ax.scatter(early_min_epoch, early_min_loss, color='orange', s=60, 
+                                          zorder=4, marker='o', alpha=0.8)
+                                ax.annotate(f'Not saved: {early_min_loss:.4f}\n(too early)', 
+                                           xy=(early_min_epoch, early_min_loss),
+                                           xytext=(-15, -20), textcoords='offset points',
+                                           bbox=dict(boxstyle='round', facecolor='orange', alpha=0.6),
+                                           fontsize=7, ha='center',
+                                           arrowprops=dict(arrowstyle='->', color='orange', alpha=0.8))
+                                           
+            elif stage_val_losses:
+                # 如果整个阶段都没有达到best_start_epoch，显示最小损失但标注为未保存
                 min_idx = np.argmin(stage_val_losses)
                 min_loss = stage_val_losses[min_idx]
-                ax.scatter(min_idx, min_loss, color='red', s=50, zorder=5)
-                ax.annotate(f'Best: {min_loss:.4f}', 
+                ax.scatter(min_idx, min_loss, color='orange', s=60, zorder=4, marker='o', alpha=0.8)
+                ax.annotate(f'No model saved\n(all epochs < {best_start_epoch})', 
                            xy=(min_idx, min_loss),
                            xytext=(10, 10), textcoords='offset points',
-                           bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7),
+                           bbox=dict(boxstyle='round', facecolor='orange', alpha=0.6),
                            fontsize=8)
         
         # 隐藏多余的子图（第6个）
         for i in range(len(stage_history), 6):
             axes[i].set_visible(False)
         
-        plt.suptitle('Multi-Stage Training Loss Analysis', fontsize=16, fontweight='bold')
+        plt.suptitle('Multi-Stage Training Loss Analysis\n(Best points reflect actual model saving with delay)', 
+                     fontsize=16, fontweight='bold')
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         
-        print(f"Stage loss plot saved to: {save_path}")
+        print(f"Stage loss plot with delayed best model markers saved to: {save_path}")
         
     except ImportError:
         print("matplotlib not available, skipping stage loss plotting")

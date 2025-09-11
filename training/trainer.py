@@ -208,8 +208,8 @@ class FacialExpressionTrainer:
                 self.complete_model, optimizer, scheduler, epoch, all_metrics
             )
             
-            # 早停检查
-            if self.early_stopping(val_metrics['val_loss']):
+            # 早停检查（传递当前epoch）
+            if self.early_stopping(val_metrics['val_loss'], epoch):
                 if self.logger:
                     self.logger.info(f"早停触发，停止训练")
                 else:
@@ -448,15 +448,13 @@ class FacialExpressionTrainer:
                     print(f"=" * 60)
                 
                 # 为每个阶段重置检查点管理器，确保每个阶段都有独立的最佳模型跟踪
-                self._reset_checkpoint_for_stage(stage_name)
+                self._reset_checkpoint_for_stage(stage_name, stage_config)
+                
+                # 重置早停机制，使用阶段特定的best_model_start_epoch
+                self._reset_early_stopping_for_stage(stage_name, stage_config)
                 
                 # 训练该阶段
                 self.train_stage(stage_name, train_loader, val_loader, stage_config)
-                
-                # 重置早停
-                self.early_stopping = EarlyStopping(
-                    **self.config.training_config.get('early_stopping', {})
-                )
         
         # 训练完成后，加载最佳模型
         self._load_best_model_after_training()
@@ -546,10 +544,15 @@ class FacialExpressionTrainer:
             else:
                 print(f"❌ 阶段 {stage_name} 加载最佳模型失败: {e}")
     
-    def _reset_checkpoint_for_stage(self, stage_name: str):
+    def _reset_checkpoint_for_stage(self, stage_name: str, stage_config: Dict[str, Any]):
         """为新阶段重置检查点管理器"""
-        checkpoint_config = self.config.training_config.get('checkpoint', {})
+        checkpoint_config = self.config.training_config.get('checkpoint', {}).copy()
         save_dir = self.config.get_experiment_dir()
+        
+        # 使用阶段特定的best_model_start_epoch，如果没有则使用全局配置
+        stage_best_model_start_epoch = stage_config.get('best_model_start_epoch')
+        if stage_best_model_start_epoch is not None:
+            checkpoint_config['best_model_start_epoch'] = stage_best_model_start_epoch
         
         # 过滤掉ModelCheckpoint不支持的参数
         filtered_checkpoint_config = {
@@ -560,11 +563,33 @@ class FacialExpressionTrainer:
         # 重置检查点管理器，清除之前阶段的最佳记录
         self.checkpoint = ModelCheckpoint(save_dir, **filtered_checkpoint_config)
         
+        best_start_epoch = filtered_checkpoint_config.get('best_model_start_epoch', 0)
         if self.logger:
-            self.logger.info(f"已为阶段 {stage_name} 重置检查点管理器")
+            self.logger.info(f"已为阶段 {stage_name} 重置检查点管理器 (从第 {best_start_epoch} 个epoch开始保存最佳模型)")
         else:
-            print(f"已为阶段 {stage_name} 重置检查点管理器")
+            print(f"已为阶段 {stage_name} 重置检查点管理器 (从第 {best_start_epoch} 个epoch开始保存最佳模型)")
     
+    def _reset_early_stopping_for_stage(self, stage_name: str, stage_config: Dict[str, Any]):
+        """为新阶段重置早停机制"""
+        early_stopping_config = self.config.training_config.get('early_stopping', {}).copy()
+        
+        # 使用阶段特定的best_model_start_epoch作为early stopping的start_epoch
+        stage_best_model_start_epoch = stage_config.get('best_model_start_epoch')
+        if stage_best_model_start_epoch is not None:
+            early_stopping_config['start_epoch'] = stage_best_model_start_epoch
+        else:
+            # 如果阶段没有特定设置，使用全局检查点配置中的值
+            global_best_start = self.config.training_config.get('checkpoint', {}).get('best_model_start_epoch', 0)
+            early_stopping_config['start_epoch'] = global_best_start
+        
+        # 重置早停机制
+        self.early_stopping = EarlyStopping(**early_stopping_config)
+        
+        early_start_epoch = early_stopping_config.get('start_epoch', 0)
+        if self.logger:
+            self.logger.info(f"已为阶段 {stage_name} 重置早停机制 (从第 {early_start_epoch} 个epoch开始启用早停)")
+        else:
+            print(f"已为阶段 {stage_name} 重置早停机制 (从第 {early_start_epoch} 个epoch开始启用早停)")
     def save_training_history(self):
         """保存训练历史"""
         history_path = os.path.join(self.config.get_experiment_dir(), 'training_history.json')
