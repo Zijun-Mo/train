@@ -39,7 +39,6 @@ checkpoints/
 tensorboard_logs/
 
 # 数据文件
-data/
 dataset/
 *.npy
 *.npz

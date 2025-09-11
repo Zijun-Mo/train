@@ -3,7 +3,7 @@
 # 数据配置
 data:
   # 数据根目录
-  root_dir: "/home/jun/picture/output"
+  root_dir: "/home/jun/picture/output/eye_close"
   # 预训练模型路径
   face_blendshapes_model: "/home/jun/picture/extracted_models/face_blendshapes.tflite"
   # 训练/验证集划分比例
@@ -57,8 +57,8 @@ training:
     # 阶段2a: 关键点全连接层训练
     landmark_fc_train:
       epochs: 20
-      learning_rate: 0.001        # 较高学习率训练FC层
-      weight_decay: 0.0001
+      learning_rate: 0.01        # 较高学习率训练FC层
+      weight_decay: 0.001
       scheduler: "step"
       step_size: 8
       gamma: 0.5
@@ -67,8 +67,8 @@ training:
     # 阶段2b: 关键点模型微调
     landmark_finetune:
       epochs: 20
-      learning_rate: 0.0001       # 较低学习率微调整个路径
-      weight_decay: 0.00001
+      learning_rate: 0.001       # 较低学习率微调整个路径
+      weight_decay: 0.0001
       scheduler: "cosine"
       freeze_tflite: false       # 解冻TFLite进行端到端微调
       
@@ -89,12 +89,8 @@ training:
   
   # 损失函数配置
   loss:
-    type: "mse"  # 均方误差
+    type: "mse"  # 均方误差损失
     weights: [1.0, 1.0]  # dynamics和synkinesis的权重
-    # 增强损失配置
-    label_smoothing: 0.1    # 标签平滑，减少过拟合
-    focal_loss_alpha: 0.25  # Focal Loss参数（如果使用）
-    focal_loss_gamma: 2.0   # Focal Loss参数（如果使用）
     
   # 优化器配置
   optimizer:
