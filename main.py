@@ -66,18 +66,20 @@ def main():
         # 创建数据加载器
         print("创建数据加载器...")
         data_config = config.data_config
-        train_loader, val_loader = create_data_loaders(
+        train_loader, val_loader, test_loader = create_data_loaders(
             data_config, synchronized_augmenter
         )
         logger.info(f"训练集大小: {len(train_loader.dataset)}")
         logger.info(f"验证集大小: {len(val_loader.dataset)}")
+        logger.info(f"测试集大小: {len(test_loader.dataset)}")
         logger.info(f"训练批次数: {len(train_loader)}")
         logger.info(f"验证批次数: {len(val_loader)}")
+        logger.info(f"测试批次数: {len(test_loader)}")
         
         # 如果只是测试数据，则退出
         if args.test_data:
             print("测试数据加载...")
-            test_data_loading(train_loader, val_loader, logger)
+            test_data_loading(train_loader, val_loader, test_loader, logger)
             return
         
         # 创建训练器
@@ -110,7 +112,7 @@ def main():
         print(f"结果保存在: {config.get_experiment_dir()}")
         
         # 生成评估报告
-        generate_evaluation_report(config, trainer, logger)
+        generate_evaluation_report(config, trainer, test_loader, logger)
         
     except KeyboardInterrupt:
         print("\n训练被用户中断")
@@ -123,7 +125,7 @@ def main():
         raise
 
 
-def test_data_loading(train_loader, val_loader, logger):
+def test_data_loading(train_loader, val_loader, test_loader, logger):
     """测试数据加载"""
     try:
         logger.info("测试训练数据加载...")
@@ -147,12 +149,59 @@ def test_data_loading(train_loader, val_loader, logger):
             if i >= 1:  # 只测试前几个批次
                 break
         
+        logger.info("测试测试数据加载...")
+        for i, batch in enumerate(test_loader):
+            logger.info(f"测试批次 {i}:")
+            logger.info(f"  光流图像: {batch['optical_flow'].shape}")
+            logger.info(f"  关键点特征: {batch['landmark_features'].shape}")
+            logger.info(f"  目标: {batch['target'].shape}")
+            
+            if i >= 1:  # 只测试前几个批次
+                break
+        
         logger.info("数据加载测试完成")
         print("数据加载测试完成")
         
     except Exception as e:
         logger.error(f"数据加载测试失败: {e}", exc_info=True)
         print(f"数据加载测试失败: {e}")
+
+
+def evaluate_model_on_training_set(trainer, metrics_calculator, logger):
+    """在训练集上评估模型（简略）"""
+    try:
+        logger.info("开始训练集简略评估...")
+        
+        # 获取训练数据加载器
+        if not hasattr(trainer, 'train_loader') or trainer.train_loader is None:
+            logger.warning("训练数据加载器不可用")
+            return {}
+        
+        # 使用较少的批次进行快速评估
+        max_batches = min(10, len(trainer.train_loader))  # 最多评估10个批次
+        
+        # 评估模型（只评估部分训练数据以节省时间）
+        from utils.metrics import evaluate_model_on_dataset_partial
+        train_metrics = evaluate_model_on_dataset_partial(
+            model=trainer.complete_model,
+            data_loader=trainer.train_loader,
+            device=trainer.device,
+            metrics_calculator=metrics_calculator,
+            loss_config=trainer.loss_config,
+            max_batches=max_batches
+        )
+        
+        # 打印简略指标
+        logger.info("训练集简略评估结果:")
+        logger.info(f"  整体损失: {train_metrics.get('loss', 0):.4f}")
+        logger.info(f"  整体MSE: {train_metrics.get('mse', 0):.4f}")
+        logger.info(f"  整体准确率: {train_metrics.get('overall_accuracy', 0):.4f}")
+        
+        return train_metrics
+        
+    except Exception as e:
+        logger.error(f"训练集评估失败: {e}")
+        return {}
 
 
 def evaluate_model_on_validation_set(trainer, metrics_calculator, logger):
@@ -195,7 +244,7 @@ def evaluate_model_on_validation_set(trainer, metrics_calculator, logger):
         return {}
 
 
-def generate_evaluation_report(config, trainer, logger):
+def generate_evaluation_report(config, trainer, test_loader, logger):
     """生成评估报告"""
     try:
         logger.info("生成评估报告...")
@@ -213,6 +262,14 @@ def generate_evaluation_report(config, trainer, logger):
         logger.info("在验证集上进行最终评估...")
         val_metrics = evaluate_model_on_validation_set(trainer, metrics_calculator, logger)
         
+        # 在训练集上进行简略评估
+        logger.info("在训练集上进行简略评估...")
+        train_metrics = evaluate_model_on_training_set(trainer, metrics_calculator, logger)
+        
+        # 在测试集上进行评估
+        logger.info("在测试集上进行评估...")
+        test_metrics = trainer.evaluate_test_set(test_loader)
+        
         # 生成训练曲线图
         if config.get('logging.visualize.enabled', True):
             plot_path = os.path.join(config.get_experiment_dir(), 'training_curves.png')
@@ -226,7 +283,7 @@ def generate_evaluation_report(config, trainer, logger):
         
         # 生成最终报告
         report_path = os.path.join(config.get_experiment_dir(), 'training_report.txt')
-        generate_final_report(trainer, report_path, logger, val_metrics, config)
+        generate_final_report(trainer, report_path, logger, train_metrics, val_metrics, test_metrics, config)
         
         logger.info("评估报告生成完成")
         
@@ -456,7 +513,7 @@ def plot_stage_losses(train_history, val_history, stage_history, save_path, conf
         print(f"Failed to plot stage losses: {e}")
 
 
-def generate_final_report(trainer, report_path, logger, val_metrics=None, config=None):
+def generate_final_report(trainer, report_path, logger, train_metrics=None, val_metrics=None, test_metrics=None, config=None):
     """生成最终报告"""
     try:
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -467,29 +524,45 @@ def generate_final_report(trainer, report_path, logger, val_metrics=None, config
             f.write("训练总结:\n")
             f.write(f"- 总训练轮数: {len(trainer.train_history)}\n")
             
-            # 验证集最终评估结果
+            # 训练集简略评估结果
+            if train_metrics:
+                f.write("\n训练集评估结果 (简略):\n")
+                f.write(f"- 整体MSE: {train_metrics.get('mse', 0):.4f}\n")
+                f.write(f"- 整体准确率: {train_metrics.get('overall_accuracy', 0):.4f}\n")
+                f.write(f"- Dynamics准确率: {train_metrics.get('dynamics_accuracy', 0):.4f}\n")
+                f.write(f"- Synkinesis准确率: {train_metrics.get('synkinesis_accuracy', 0):.4f}\n\n")
+            
+            # 验证集简略评估结果
             if val_metrics:
-                f.write("\n验证集最终评估结果:\n")
+                f.write("\n验证集评估结果 (简略):\n")
                 f.write(f"- 整体MSE: {val_metrics.get('mse', 0):.4f}\n")
-                f.write(f"- 整体MAE: {val_metrics.get('mae', 0):.4f}\n")
-                f.write(f"- 整体准确率 (样本级): {val_metrics.get('overall_accuracy', 0):.4f}\n")
+                f.write(f"- 整体准确率: {val_metrics.get('overall_accuracy', 0):.4f}\n")
+                f.write(f"- Dynamics准确率: {val_metrics.get('dynamics_accuracy', 0):.4f}\n")
+                f.write(f"- Synkinesis准确率: {val_metrics.get('synkinesis_accuracy', 0):.4f}\n\n")
+            
+            # 测试集详细评估结果
+            if test_metrics:
+                f.write("\n测试集详细评估结果:\n")
+                f.write(f"- 整体MSE: {test_metrics.get('mse', 0):.4f}\n")
+                f.write(f"- 整体MAE: {test_metrics.get('mae', 0):.4f}\n")
+                f.write(f"- 整体准确率 (样本级): {test_metrics.get('overall_accuracy', 0):.4f}\n")
                 f.write("  (注: 只有当样本的两个维度都在容忍范围内时才算正确)\n\n")
                 
                 f.write("Dynamics 表情维度:\n")
-                f.write(f"- MSE: {val_metrics.get('dynamics_mse', 0):.4f}\n")
-                f.write(f"- MAE: {val_metrics.get('dynamics_mae', 0):.4f}\n")
-                f.write(f"- 准确率: {val_metrics.get('dynamics_accuracy', 0):.4f}\n")
-                f.write(f"- 标准差: {val_metrics.get('dynamics_std', 0):.4f}\n")
-                f.write(f"- Pearson相关系数: {val_metrics.get('dynamics_pearson', 0):.4f}\n")
-                f.write(f"- Spearman相关系数: {val_metrics.get('dynamics_spearman', 0):.4f}\n\n")
+                f.write(f"- MSE: {test_metrics.get('dynamics_mse', 0):.4f}\n")
+                f.write(f"- MAE: {test_metrics.get('dynamics_mae', 0):.4f}\n")
+                f.write(f"- 准确率: {test_metrics.get('dynamics_accuracy', 0):.4f}\n")
+                f.write(f"- 标准差: {test_metrics.get('dynamics_std', 0):.4f}\n")
+                f.write(f"- Pearson相关系数: {test_metrics.get('dynamics_pearson', 0):.4f}\n")
+                f.write(f"- Spearman相关系数: {test_metrics.get('dynamics_spearman', 0):.4f}\n\n")
                 
                 f.write("Synkinesis 表情维度:\n")
-                f.write(f"- MSE: {val_metrics.get('synkinesis_mse', 0):.4f}\n")
-                f.write(f"- MAE: {val_metrics.get('synkinesis_mae', 0):.4f}\n")
-                f.write(f"- 准确率: {val_metrics.get('synkinesis_accuracy', 0):.4f}\n")
-                f.write(f"- 标准差: {val_metrics.get('synkinesis_std', 0):.4f}\n")
-                f.write(f"- Pearson相关系数: {val_metrics.get('synkinesis_pearson', 0):.4f}\n")
-                f.write(f"- Spearman相关系数: {val_metrics.get('synkinesis_spearman', 0):.4f}\n\n")
+                f.write(f"- MSE: {test_metrics.get('synkinesis_mse', 0):.4f}\n")
+                f.write(f"- MAE: {test_metrics.get('synkinesis_mae', 0):.4f}\n")
+                f.write(f"- 准确率: {test_metrics.get('synkinesis_accuracy', 0):.4f}\n")
+                f.write(f"- 标准差: {test_metrics.get('synkinesis_std', 0):.4f}\n")
+                f.write(f"- Pearson相关系数: {test_metrics.get('synkinesis_pearson', 0):.4f}\n")
+                f.write(f"- Spearman相关系数: {test_metrics.get('synkinesis_spearman', 0):.4f}\n\n")
                 
                 f.write("准确率计算说明:\n")
                 f.write("- 样本级准确率: 只有当样本的dynamics和synkinesis都在容忍范围内时，该样本才被认为是正确的\n")
@@ -513,6 +586,16 @@ def generate_final_report(trainer, report_path, logger, val_metrics=None, config
             f.write("- 几何变换: 水平翻转、旋转、缩放、平移\n")
             f.write("- 图像颜色增强: 亮度、对比度、饱和度、色调\n")
             f.write("- 关键点噪声增强: 高斯噪声模拟检测误差\n")
+            
+            # 数据集划分信息
+            f.write("\n数据集划分:\n")
+            train_ratio = config.get('data', {}).get('train_ratio', 0.7)
+            val_ratio = config.get('data', {}).get('val_ratio', 0.15)
+            test_ratio = config.get('data', {}).get('test_ratio', 0.15)
+            f.write(f"- 训练集比例: {train_ratio:.1%}\n")
+            f.write(f"- 验证集比例: {val_ratio:.1%}\n")
+            f.write(f"- 测试集比例: {test_ratio:.1%}\n")
+            f.write("- 按视频ID进行划分，确保同一视频的帧不会跨数据集\n")
             
         logger.info(f"最终报告已保存: {report_path}")
         

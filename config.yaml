@@ -6,8 +6,10 @@ data:
   root_dir: "/home/jun/picture/output/eye_close"
   # 预训练模型路径
   face_blendshapes_model: "/home/jun/picture/extracted_models/face_blendshapes.tflite"
-  # 训练/验证集划分比例
-  train_ratio: 0.8
+  # 数据集划分比例 (训练集/验证集/测试集)
+  train_ratio: 0.7      # 训练集比例
+  val_ratio: 0.15       # 验证集比例
+  test_ratio: 0.15      # 测试集比例 (注：三个比例之和应为1.0)
   # 数据加载器设置
   batch_size: 32
   num_workers: 4

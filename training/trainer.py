@@ -627,3 +627,100 @@ class FacialExpressionTrainer:
             print(f"检查点信息: {checkpoint_info}")
         
         return checkpoint_info
+    
+    def evaluate_test_set(self, test_loader: DataLoader) -> Dict[str, float]:
+        """
+        在测试集上评估模型
+        
+        Args:
+            test_loader: 测试数据加载器
+            
+        Returns:
+            包含各种评估指标的字典
+        """
+        self.complete_model.eval()
+        
+        test_loss = 0.0
+        num_batches = len(test_loader)
+        
+        all_predictions = []
+        all_targets = []
+        
+        if self.logger:
+            self.logger.info("开始测试集评估...")
+        else:
+            print("开始测试集评估...")
+        
+        with torch.no_grad():
+            with tqdm(test_loader, desc="Test Evaluation") as pbar:
+                for batch_idx, batch in enumerate(pbar):
+                    # 移动数据到设备
+                    optical_flow = batch['optical_flow'].to(self.device, non_blocking=True)
+                    landmark_features = batch['landmark_features'].to(self.device, non_blocking=True)
+                    target = batch['target'].to(self.device, non_blocking=True)
+                    
+                    # 前向传播
+                    output = self.complete_model(optical_flow, landmark_features)
+                    
+                    # 计算损失
+                    loss_type = self.loss_config.get('type', 'mse')
+                    loss_weights = self.loss_config.get('weights', [1.0, 1.0])
+                    loss = calculate_loss(output, target, loss_type, loss_weights)
+                    test_loss += loss.item()
+                    
+                    # 收集预测和目标
+                    all_predictions.append(output.cpu())
+                    all_targets.append(target.cpu())
+                    
+                    # 更新进度条
+                    pbar.set_postfix({
+                        'loss': f"{loss.item():.4f}",
+                        'avg_loss': f"{test_loss / (batch_idx + 1):.4f}"
+                    })
+        
+        # 计算平均损失
+        test_loss /= num_batches
+        
+        # 合并所有预测和目标
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
+        
+        # 重置指标计算器并更新数据
+        self.metrics_calculator.reset()
+        self.metrics_calculator.update(all_predictions, all_targets)
+        
+        # 计算详细指标
+        test_metrics = self.metrics_calculator.compute_metrics()
+        test_metrics['loss'] = test_loss
+        
+        # 记录测试结果
+        if self.logger:
+            self.logger.info("测试集评估结果:")
+            self.logger.info(f"  测试损失: {test_loss:.4f}")
+            self.logger.info(f"  整体MSE: {test_metrics.get('mse', 0):.4f}")
+            self.logger.info(f"  整体MAE: {test_metrics.get('mae', 0):.4f}")
+            self.logger.info(f"  整体准确率: {test_metrics.get('overall_accuracy', 0):.4f}")
+            
+            self.logger.info(f"  Dynamics - MSE: {test_metrics.get('dynamics_mse', 0):.4f}, "
+                           f"Acc: {test_metrics.get('dynamics_accuracy', 0):.4f}, "
+                           f"Pearson: {test_metrics.get('dynamics_pearson', 0):.4f}")
+            
+            self.logger.info(f"  Synkinesis - MSE: {test_metrics.get('synkinesis_mse', 0):.4f}, "
+                           f"Acc: {test_metrics.get('synkinesis_accuracy', 0):.4f}, "
+                           f"Pearson: {test_metrics.get('synkinesis_pearson', 0):.4f}")
+        else:
+            print("测试集评估结果:")
+            print(f"  测试损失: {test_loss:.4f}")
+            print(f"  整体MSE: {test_metrics.get('mse', 0):.4f}")
+            print(f"  整体MAE: {test_metrics.get('mae', 0):.4f}")
+            print(f"  整体准确率: {test_metrics.get('overall_accuracy', 0):.4f}")
+            
+            print(f"  Dynamics - MSE: {test_metrics.get('dynamics_mse', 0):.4f}, "
+                  f"Acc: {test_metrics.get('dynamics_accuracy', 0):.4f}, "
+                  f"Pearson: {test_metrics.get('dynamics_pearson', 0):.4f}")
+            
+            print(f"  Synkinesis - MSE: {test_metrics.get('synkinesis_mse', 0):.4f}, "
+                  f"Acc: {test_metrics.get('synkinesis_accuracy', 0):.4f}, "
+                  f"Pearson: {test_metrics.get('synkinesis_pearson', 0):.4f}")
+        
+        return test_metrics

@@ -165,19 +165,27 @@ class FacialExpressionDataset(Dataset):
         }
 
 
-def split_dataset(data_root: str, train_ratio: float = 0.8, 
-                  random_seed: int = 42) -> Tuple[List[str], List[str]]:
+def split_dataset(data_root: str, train_ratio: float = 0.7, 
+                  val_ratio: float = 0.15, test_ratio: float = 0.15,
+                  random_seed: int = 42) -> Tuple[List[str], List[str], List[str]]:
     """
-    按视频划分训练集和验证集
+    按视频划分训练集、验证集和测试集
     
     Args:
         data_root: 数据根目录
         train_ratio: 训练集比例
+        val_ratio: 验证集比例
+        test_ratio: 测试集比例
         random_seed: 随机种子
         
     Returns:
-        训练集和验证集的视频ID列表
+        训练集、验证集和测试集的视频ID列表
     """
+    # 验证比例和是否为1
+    total_ratio = train_ratio + val_ratio + test_ratio
+    if abs(total_ratio - 1.0) > 1e-6:
+        raise ValueError(f"数据集划分比例之和必须为1.0，当前为{total_ratio}")
+    
     # 获取所有视频ID
     video_ids = set()
     
@@ -188,23 +196,36 @@ def split_dataset(data_root: str, train_ratio: float = 0.8,
             continue
             
         try:
-            video_id, frame_id = video_frame.split('_')
-            video_ids.add(video_id)
-        except ValueError:
+            # 更健壮的视频ID和帧ID解析
+            # 期望格式：video_id_frame_id，其中可能包含多个下划线
+            parts = video_frame.split('_')
+            if len(parts) >= 2:
+                # 取第一部分作为video_id，剩余部分作为frame_id
+                video_id = parts[0]
+                video_ids.add(video_id)
+        except (ValueError, IndexError):
             continue
     
     video_ids = sorted(list(video_ids))
     
-    # 划分训练集和验证集
-    train_video_ids, val_video_ids = train_test_split(
+    # 首先划分训练集和临时集（验证+测试）
+    train_video_ids, temp_video_ids = train_test_split(
         video_ids, train_size=train_ratio, random_state=random_seed
     )
     
-    return train_video_ids, val_video_ids
+    # 计算验证集在临时集中的比例
+    val_ratio_in_temp = val_ratio / (val_ratio + test_ratio)
+    
+    # 将临时集划分为验证集和测试集
+    val_video_ids, test_video_ids = train_test_split(
+        temp_video_ids, train_size=val_ratio_in_temp, random_state=random_seed
+    )
+    
+    return train_video_ids, val_video_ids, test_video_ids
 
 
 def create_data_loaders(config: Dict[str, Any], 
-                       synchronized_augmenter: SynchronizedAugmentation) -> Tuple[DataLoader, DataLoader]:
+                       synchronized_augmenter: SynchronizedAugmentation) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     创建数据加载器
     
@@ -213,19 +234,24 @@ def create_data_loaders(config: Dict[str, Any],
         synchronized_augmenter: 同步数据增强器
         
     Returns:
-        训练和验证数据加载器
+        训练、验证和测试数据加载器
     """
     data_root = config['root_dir']
     face_blendshapes_model_path = config['face_blendshapes_model']
-    train_ratio = config.get('train_ratio', 0.8)
+    train_ratio = config.get('train_ratio', 0.7)
+    val_ratio = config.get('val_ratio', 0.15)
+    test_ratio = config.get('test_ratio', 0.15)
     batch_size = config.get('batch_size', 32)
     num_workers = config.get('num_workers', 4)
     
     # 划分数据集
-    train_video_ids, val_video_ids = split_dataset(data_root, train_ratio)
+    train_video_ids, val_video_ids, test_video_ids = split_dataset(
+        data_root, train_ratio, val_ratio, test_ratio
+    )
     
     print(f"训练集视频数量: {len(train_video_ids)}")
     print(f"验证集视频数量: {len(val_video_ids)}")
+    print(f"测试集视频数量: {len(test_video_ids)}")
     
     # 使用连续值输出格式（回归模式）
     output_format = 'continuous'
@@ -250,8 +276,18 @@ def create_data_loaders(config: Dict[str, Any],
         preload_features=config.get('preload_features', False)
     )
     
+    test_dataset = FacialExpressionDataset(
+        data_root=data_root,
+        video_ids=test_video_ids,
+        face_blendshapes_model_path=face_blendshapes_model_path,
+        synchronized_augmenter=synchronized_augmenter,
+        training=False,
+        preload_features=config.get('preload_features', False)
+    )
+    
     print(f"训练集样本数量: {len(train_dataset)}")
     print(f"验证集样本数量: {len(val_dataset)}")
+    print(f"测试集样本数量: {len(test_dataset)}")
     
     # 创建数据加载器
     train_loader = DataLoader(
@@ -272,7 +308,16 @@ def create_data_loaders(config: Dict[str, Any],
         drop_last=False
     )
     
-    return train_loader, val_loader
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False
+    )
+    
+    return train_loader, val_loader, test_loader
 
 
 def test_dataset():
@@ -281,7 +326,9 @@ def test_dataset():
     config = {
         'root_dir': '/home/jun/picture/output',
         'face_blendshapes_model': '/home/jun/picture/extracted_models/face_blendshapes.tflite',
-        'train_ratio': 0.8,
+        'train_ratio': 0.7,
+        'val_ratio': 0.15,
+        'test_ratio': 0.15,
         'batch_size': 4,
         'num_workers': 0,
         'preload_features': False
@@ -310,7 +357,7 @@ def test_dataset():
     
     try:
         # 创建数据加载器
-        train_loader, val_loader = create_data_loaders(
+        train_loader, val_loader, test_loader = create_data_loaders(
             config, synchronized_augmenter
         )
         
@@ -327,6 +374,14 @@ def test_dataset():
         for i, batch in enumerate(val_loader):
             if i == 0:  # 只显示第一个batch的信息
                 print(f"验证batch形状: 光流{batch['optical_flow'].shape}, "
+                      f"关键点{batch['landmark_features'].shape}, "
+                      f"目标{batch['target'].shape}")
+            if i >= 1:  # 只测试前几个batch
+                break
+        
+        for i, batch in enumerate(test_loader):
+            if i == 0:  # 只显示第一个batch的信息
+                print(f"测试batch形状: 光流{batch['optical_flow'].shape}, "
                       f"关键点{batch['landmark_features'].shape}, "
                       f"目标{batch['target'].shape}")
             if i >= 1:  # 只测试前几个batch

@@ -371,5 +371,71 @@ def test_metrics():
     print("\n测试完成!")
 
 
+def evaluate_model_on_dataset_partial(model, data_loader, device, metrics_calculator, loss_config, max_batches=10):
+    """
+    在数据集的部分数据上快速评估模型（用于训练集的简略评估）
+    
+    Args:
+        model: 要评估的模型
+        data_loader: 数据加载器
+        device: 设备
+        metrics_calculator: 指标计算器
+        loss_config: 损失配置
+        max_batches: 最大评估批次数
+        
+    Returns:
+        包含评估指标的字典
+    """
+    model.eval()
+    metrics_calculator.reset()
+    
+    total_loss = 0.0
+    batch_count = 0
+    
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(data_loader):
+            if batch_idx >= max_batches:
+                break
+                
+            # 移动数据到设备
+            optical_flow = batch['optical_flow'].to(device, non_blocking=True)
+            landmark_features = batch['landmark_features'].to(device, non_blocking=True)
+            target = batch['target'].to(device, non_blocking=True)
+            
+            # 前向传播
+            if hasattr(model, 'optical_flow_model') and hasattr(model, 'landmark_model'):
+                # 完整模型
+                pred = model(optical_flow, landmark_features)
+            elif hasattr(model, 'optical_flow_model'):
+                # 只有光流模型
+                pred = model(optical_flow)
+            else:  # 关键点特征
+                pred = model(landmark_features)
+            
+            # 计算损失
+            loss = calculate_loss(
+                pred, target,
+                loss_config.get('type', 'mse'),
+                loss_config.get('weights', [1.0, 1.0])
+            )
+            
+            total_loss += loss.item()
+            batch_count += 1
+            
+            # 更新指标
+            metrics_calculator.update(pred, target)
+    
+    # 计算指标
+    metrics = metrics_calculator.compute_metrics()
+    
+    # 添加平均损失
+    if batch_count > 0:
+        metrics['loss'] = total_loss / batch_count
+    else:
+        metrics['loss'] = 0.0
+    
+    return metrics
+
+
 if __name__ == "__main__":
     test_metrics()
