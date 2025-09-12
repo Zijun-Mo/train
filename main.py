@@ -76,12 +76,6 @@ def main():
         logger.info(f"验证批次数: {len(val_loader)}")
         logger.info(f"测试批次数: {len(test_loader)}")
         
-        # 如果只是测试数据，则退出
-        if args.test_data:
-            print("测试数据加载...")
-            test_data_loading(train_loader, val_loader, test_loader, logger)
-            return
-        
         # 创建训练器
         print("创建训练器...")
         trainer = FacialExpressionTrainer(config, logger)
@@ -124,47 +118,6 @@ def main():
             logger.error(f"训练过程中发生错误: {e}", exc_info=True)
         raise
 
-
-def test_data_loading(train_loader, val_loader, test_loader, logger):
-    """测试数据加载"""
-    try:
-        logger.info("测试训练数据加载...")
-        for i, batch in enumerate(train_loader):
-            logger.info(f"训练批次 {i}:")
-            logger.info(f"  光流图像: {batch['optical_flow'].shape}")
-            logger.info(f"  关键点特征: {batch['landmark_features'].shape}")
-            logger.info(f"  目标: {batch['target'].shape}")
-            logger.info(f"  视频ID: {batch['video_id'][:3]}...")
-            
-            if i >= 2:  # 只测试前几个批次
-                break
-        
-        logger.info("测试验证数据加载...")
-        for i, batch in enumerate(val_loader):
-            logger.info(f"验证批次 {i}:")
-            logger.info(f"  光流图像: {batch['optical_flow'].shape}")
-            logger.info(f"  关键点特征: {batch['landmark_features'].shape}")
-            logger.info(f"  目标: {batch['target'].shape}")
-            
-            if i >= 1:  # 只测试前几个批次
-                break
-        
-        logger.info("测试测试数据加载...")
-        for i, batch in enumerate(test_loader):
-            logger.info(f"测试批次 {i}:")
-            logger.info(f"  光流图像: {batch['optical_flow'].shape}")
-            logger.info(f"  关键点特征: {batch['landmark_features'].shape}")
-            logger.info(f"  目标: {batch['target'].shape}")
-            
-            if i >= 1:  # 只测试前几个批次
-                break
-        
-        logger.info("数据加载测试完成")
-        print("数据加载测试完成")
-        
-    except Exception as e:
-        logger.error(f"数据加载测试失败: {e}", exc_info=True)
-        print(f"数据加载测试失败: {e}")
 
 
 def evaluate_model_on_training_set(trainer, metrics_calculator, logger):

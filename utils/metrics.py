@@ -306,69 +306,7 @@ def print_metrics_summary(metrics: Dict[str, float], title: str = "Metrics Summa
         print(f"  Pearson: {metrics['synkinesis_pearson']:.4f}")
 
 
-def test_metrics():
-    """测试指标计算"""
-    print("测试指标计算...")
-    
-    # 创建指标计算器
-    calculator = MetricsCalculator(
-        score_ranges={'dynamics': [0, 5], 'synkinesis': [0, 3]},
-        tolerance=0.5
-    )
-    
-    # 模拟一些预测和目标数据，用于演示样本级准确率
-    print("\n演示样本级准确率计算:")
-    print("=" * 50)
-    
-    # 手动创建一些样本来展示效果
-    import torch
-    
-    # 样本1: dynamics正确, synkinesis正确 -> 整体正确
-    preds1 = torch.tensor([[2.1, 1.8]], dtype=torch.float32)  # 预测
-    targets1 = torch.tensor([[2.0, 2.0]], dtype=torch.float32)  # 真实
-    calculator.update(preds1, targets1)
-    print("样本1: dynamics误差=0.1✓, synkinesis误差=0.2✓ -> 样本正确")
-    
-    # 样本2: dynamics正确, synkinesis错误 -> 整体错误
-    preds2 = torch.tensor([[3.1, 1.2]], dtype=torch.float32)
-    targets2 = torch.tensor([[3.0, 2.0]], dtype=torch.float32)
-    calculator.update(preds2, targets2)
-    print("样本2: dynamics误差=0.1✓, synkinesis误差=0.8✗ -> 样本错误")
-    
-    # 样本3: dynamics错误, synkinesis正确 -> 整体错误
-    preds3 = torch.tensor([[1.2, 0.9]], dtype=torch.float32)
-    targets3 = torch.tensor([[2.0, 1.0]], dtype=torch.float32)
-    calculator.update(preds3, targets3)
-    print("样本3: dynamics误差=0.8✗, synkinesis误差=0.1✓ -> 样本错误")
-    
-    # 样本4: dynamics正确, synkinesis正确 -> 整体正确
-    preds4 = torch.tensor([[4.3, 1.6]], dtype=torch.float32)
-    targets4 = torch.tensor([[4.0, 1.5]], dtype=torch.float32)
-    calculator.update(preds4, targets4)
-    print("样本4: dynamics误差=0.3✓, synkinesis误差=0.1✓ -> 样本正确")
-    
-    # 添加更多随机样本
-    batch_size = 6
-    for i in range(2):  # 2个额外batch
-        preds = torch.randn(batch_size, 2) * 0.3 + torch.tensor([2.5, 1.5])  # 中心在合理范围
-        targets = torch.randn(batch_size, 2) * 0.3 + torch.tensor([2.5, 1.5])
-        calculator.update(preds, targets)
-    
-    # 计算指标
-    metrics = calculator.compute_metrics()
-    
-    # 打印结果
-    print(f"\n预期结果: 4个手动样本中有2个正确，整体准确率应该≤0.5")
-    print_metrics_summary(metrics, "Sample-Level Accuracy Test")
-    
-    print(f"\n关键观察:")
-    print(f"- 整体准确率 (样本级): {metrics['overall_accuracy']:.3f}")
-    print(f"- Dynamics准确率: {metrics['dynamics_accuracy']:.3f}")  
-    print(f"- Synkinesis准确率: {metrics['synkinesis_accuracy']:.3f}")
-    print(f"- 注意: 整体准确率 ≤ min(dynamics准确率, synkinesis准确率)")
-    print(f"- 这反映了只有两个维度都正确时样本才被认为是正确的")
-    
-    print("\n测试完成!")
+
 
 
 def evaluate_model_on_dataset_partial(model, data_loader, device, metrics_calculator, loss_config, max_batches=10):
@@ -435,7 +373,3 @@ def evaluate_model_on_dataset_partial(model, data_loader, device, metrics_calcul
         metrics['loss'] = 0.0
     
     return metrics
-
-
-if __name__ == "__main__":
-    test_metrics()

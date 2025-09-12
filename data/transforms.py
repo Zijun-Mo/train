@@ -143,34 +143,4 @@ class DataNormalizer:
         return scores * self.score_stats['std'] + self.score_stats['mean']
 
 
-def test_data_loading():
-    """测试数据加载函数"""
-    print("测试数据加载函数...")
-    
-    # 创建测试数据
-    test_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-    test_landmarks = np.random.randn(146, 2).astype(np.float32)
-    
-    print(f"测试图像形状: {test_image.shape}")
-    print(f"测试关键点形状: {test_landmarks.shape}")
-    
-    # 测试数据标准化器
-    normalizer = DataNormalizer()
-    
-    # 模拟拟合数据
-    landmark_list = [np.random.randn(146, 2) for _ in range(100)]
-    score_list = [np.random.randn(2) for _ in range(100)]
-    
-    normalizer.fit_landmarks(landmark_list)
-    normalizer.fit_scores(score_list)
-    
-    # 测试标准化
-    normalized = normalizer.normalize_landmarks(test_landmarks)
-    denormalized = normalizer.denormalize_landmarks(normalized)
-    
-    print(f"关键点标准化误差: {np.mean(np.abs(test_landmarks - denormalized))}")
-    print("数据加载测试完成!")
 
-
-if __name__ == "__main__":
-    test_data_loading()
