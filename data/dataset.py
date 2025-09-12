@@ -10,7 +10,8 @@ from typing import Dict, List, Tuple, Any, Optional
 import random
 from sklearn.model_selection import train_test_split
 
-from data.transforms import OpticalFlowTransforms, LandmarkTransforms, load_optical_flow_image, load_landmarks
+from data.transforms import load_optical_flow_image, load_landmarks
+from data.synchronized_augmentation import SynchronizedAugmentation
 from models.face_blendshapes import DualFaceBlendshapesExtractor
 
 
@@ -21,8 +22,7 @@ class FacialExpressionDataset(Dataset):
                  data_root: str,
                  video_ids: List[str],
                  face_blendshapes_model_path: str,
-                 optical_flow_transforms: OpticalFlowTransforms,
-                 landmark_transforms: LandmarkTransforms,
+                 synchronized_augmenter: SynchronizedAugmentation,
                  training: bool = True,
                  preload_features: bool = False):
         """
@@ -32,15 +32,13 @@ class FacialExpressionDataset(Dataset):
             data_root: 数据根目录
             video_ids: 视频ID列表
             face_blendshapes_model_path: face_blendshapes模型路径
-            optical_flow_transforms: 光流图像变换器
-            landmark_transforms: 关键点变换器
+            synchronized_augmenter: 同步数据增强器
             training: 是否为训练模式
             preload_features: 是否预加载特征
         """
         self.data_root = data_root
         self.video_ids = video_ids
-        self.optical_flow_transforms = optical_flow_transforms
-        self.landmark_transforms = landmark_transforms
+        self.synchronized_augmenter = synchronized_augmenter
         self.training = training
         self.preload_features = preload_features
         
@@ -130,28 +128,20 @@ class FacialExpressionDataset(Dataset):
         """
         item = self.data_items[idx]
         
-        # 加载光流图像
+        # 加载光流图像和关键点
         optical_flow_image = load_optical_flow_image(item['optical_flow_path'])
-        optical_flow_tensor = self.optical_flow_transforms(optical_flow_image, self.training)
+        expression_landmarks = load_landmarks(item['expression_landmarks_path'])
+        baseline_landmarks = load_landmarks(item['baseline_landmarks_path'])
         
-        # 加载或获取关键点特征
-        item_key = f"{item['video_id']}_{item['frame_id']}"
-        if self.preload_features and item_key in self.preloaded_features:
-            landmark_features = self.preloaded_features[item_key]
-        else:
-            # 加载关键点
-            expression_landmarks = load_landmarks(item['expression_landmarks_path'])
-            baseline_landmarks = load_landmarks(item['baseline_landmarks_path'])
-            
-            # 应用变换
-            expression_landmarks, baseline_landmarks = self.landmark_transforms(
-                expression_landmarks, baseline_landmarks, self.training
-            )
-            
-            # 提取特征
-            landmark_features = self.feature_extractor.extract_features(
-                expression_landmarks, baseline_landmarks
-            )
+        # 应用同步数据增强
+        optical_flow_tensor, expression_landmarks, baseline_landmarks = self.synchronized_augmenter(
+            optical_flow_image, expression_landmarks, baseline_landmarks, self.training
+        )
+        
+        # 提取关键点特征
+        landmark_features = self.feature_extractor.extract_features(
+            expression_landmarks, baseline_landmarks
+        )
         
         # 转换为张量
         landmark_features_tensor = torch.from_numpy(landmark_features).float()
@@ -214,15 +204,13 @@ def split_dataset(data_root: str, train_ratio: float = 0.8,
 
 
 def create_data_loaders(config: Dict[str, Any], 
-                       optical_flow_transforms: OpticalFlowTransforms,
-                       landmark_transforms: LandmarkTransforms) -> Tuple[DataLoader, DataLoader]:
+                       synchronized_augmenter: SynchronizedAugmentation) -> Tuple[DataLoader, DataLoader]:
     """
     创建数据加载器
     
     Args:
         config: 数据配置
-        optical_flow_transforms: 光流变换器
-        landmark_transforms: 关键点变换器
+        synchronized_augmenter: 同步数据增强器
         
     Returns:
         训练和验证数据加载器
@@ -248,8 +236,7 @@ def create_data_loaders(config: Dict[str, Any],
         data_root=data_root,
         video_ids=train_video_ids,
         face_blendshapes_model_path=face_blendshapes_model_path,
-        optical_flow_transforms=optical_flow_transforms,
-        landmark_transforms=landmark_transforms,
+        synchronized_augmenter=synchronized_augmenter,
         training=True,
         preload_features=config.get('preload_features', False)
     )
@@ -258,8 +245,7 @@ def create_data_loaders(config: Dict[str, Any],
         data_root=data_root,
         video_ids=val_video_ids,
         face_blendshapes_model_path=face_blendshapes_model_path,
-        optical_flow_transforms=optical_flow_transforms,
-        landmark_transforms=landmark_transforms,
+        synchronized_augmenter=synchronized_augmenter,
         training=False,
         preload_features=config.get('preload_features', False)
     )
@@ -301,17 +287,31 @@ def test_dataset():
         'preload_features': False
     }
     
-    # 创建变换器（使用空配置进行测试）
+    # 创建同步增强器（使用空配置进行测试）
     import sys
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-    from data.transforms import create_transforms
-    optical_transforms, landmark_transforms = create_transforms({})
+    from data.synchronized_augmentation import create_synchronized_transforms
+    
+    augmentation_config = {
+        'horizontal_flip': 0.5,
+        'rotation': 10,
+        'scale_range': [0.95, 1.05],
+        'translation_range': [0.05, 0.05],
+        'brightness': 0.2,
+        'contrast': 0.2,
+        'saturation': 0.2,
+        'hue': 0.1,
+        'landmark_noise_std': 0.01,
+        'target_size': (112, 112)
+    }
+    
+    synchronized_augmenter = create_synchronized_transforms(augmentation_config)
     
     try:
         # 创建数据加载器
         train_loader, val_loader = create_data_loaders(
-            config, optical_transforms, landmark_transforms
+            config, synchronized_augmenter
         )
         
         # 测试数据加载

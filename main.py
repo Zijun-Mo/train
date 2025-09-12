@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.config import load_config
 from utils.metrics import MetricsCalculator
-from data.transforms import create_transforms
+from data.synchronized_augmentation import create_synchronized_transforms
 from data.dataset import create_data_loaders
 from training.trainer import FacialExpressionTrainer
 from training.utils import setup_logging
@@ -57,17 +57,17 @@ def main():
         logger.info(f"配置文件: {args.config}")
         logger.info(f"实验目录: {config.get_experiment_dir()}")
         
-        # 创建数据变换器
-        print("创建数据变换器...")
-        augmentation_config = config.get('augmentation', {})
-        optical_flow_transforms, landmark_transforms = create_transforms(augmentation_config)
+        # 创建数据增强器
+        print("创建数据增强器...")
+        augmentation_config = config.get('augmentation.synchronized', {})
+        synchronized_augmenter = create_synchronized_transforms(augmentation_config)
         logger.info("数据变换器创建完成")
         
         # 创建数据加载器
         print("创建数据加载器...")
         data_config = config.data_config
         train_loader, val_loader = create_data_loaders(
-            data_config, optical_flow_transforms, landmark_transforms
+            data_config, synchronized_augmenter
         )
         logger.info(f"训练集大小: {len(train_loader.dataset)}")
         logger.info(f"验证集大小: {len(val_loader.dataset)}")
