@@ -10,7 +10,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.config import load_config
-from utils.metrics import MetricsCalculator
+from utils.metrics import MetricsCalculator, evaluate_model_on_dataset
 from data.synchronized_augmentation import create_synchronized_transforms
 from data.dataset import create_data_loaders
 from training.trainer import FacialExpressionTrainer
@@ -155,6 +155,46 @@ def test_data_loading(train_loader, val_loader, logger):
         print(f"数据加载测试失败: {e}")
 
 
+def evaluate_model_on_validation_set(trainer, metrics_calculator, logger):
+    """在验证集上评估模型"""
+    try:
+        logger.info("开始验证集评估...")
+        
+        # 获取验证数据加载器
+        if not hasattr(trainer, 'val_loader') or trainer.val_loader is None:
+            logger.warning("验证数据加载器不可用")
+            return {}
+        
+        # 评估模型
+        val_metrics = evaluate_model_on_dataset(
+            model=trainer.complete_model,
+            data_loader=trainer.val_loader,
+            device=trainer.device,
+            metrics_calculator=metrics_calculator,
+            loss_config=trainer.loss_config
+        )
+        
+        # 打印详细指标
+        logger.info("验证集评估结果:")
+        logger.info(f"  整体损失: {val_metrics.get('loss', 0):.4f}")
+        logger.info(f"  整体MSE: {val_metrics.get('mse', 0):.4f}")
+        logger.info(f"  整体准确率: {val_metrics.get('overall_accuracy', 0):.4f}")
+        
+        logger.info(f"  Dynamics - MSE: {val_metrics.get('dynamics_mse', 0):.4f}, "
+                   f"Acc: {val_metrics.get('dynamics_accuracy', 0):.4f}, "
+                   f"Std: {val_metrics.get('dynamics_std', 0):.4f}")
+        
+        logger.info(f"  Synkinesis - MSE: {val_metrics.get('synkinesis_mse', 0):.4f}, "
+                   f"Acc: {val_metrics.get('synkinesis_accuracy', 0):.4f}, "
+                   f"Std: {val_metrics.get('synkinesis_std', 0):.4f}")
+        
+        return val_metrics
+        
+    except Exception as e:
+        logger.error(f"验证集评估失败: {e}")
+        return {}
+
+
 def generate_evaluation_report(config, trainer, logger):
     """生成评估报告"""
     try:
@@ -165,8 +205,13 @@ def generate_evaluation_report(config, trainer, logger):
             config.get('evaluation', {}).get('score_ranges', {
                 'dynamics': [0, 5],
                 'synkinesis': [0, 3]
-            })
+            }),
+            tolerance=config.get('validation', {}).get('tolerance', 0.5)
         )
+        
+        # 在验证集上进行最终评估
+        logger.info("在验证集上进行最终评估...")
+        val_metrics = evaluate_model_on_validation_set(trainer, metrics_calculator, logger)
         
         # 生成训练曲线图
         if config.get('logging.visualize.enabled', True):
@@ -181,7 +226,7 @@ def generate_evaluation_report(config, trainer, logger):
         
         # 生成最终报告
         report_path = os.path.join(config.get_experiment_dir(), 'training_report.txt')
-        generate_final_report(trainer, report_path, logger)
+        generate_final_report(trainer, report_path, logger, val_metrics, config)
         
         logger.info("评估报告生成完成")
         
@@ -411,7 +456,7 @@ def plot_stage_losses(train_history, val_history, stage_history, save_path, conf
         print(f"Failed to plot stage losses: {e}")
 
 
-def generate_final_report(trainer, report_path, logger):
+def generate_final_report(trainer, report_path, logger, val_metrics=None, config=None):
     """生成最终报告"""
     try:
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -422,14 +467,34 @@ def generate_final_report(trainer, report_path, logger):
             f.write("训练总结:\n")
             f.write(f"- 总训练轮数: {len(trainer.train_history)}\n")
             
-            if trainer.train_history:
-                best_train_loss = min(h.get('train_loss', float('inf')) for h in trainer.train_history)
-                best_val_loss = min(h.get('val_loss', float('inf')) for h in trainer.val_history)
-                best_val_acc = max(h.get('overall_accuracy', 0) for h in trainer.val_history)
+            # 验证集最终评估结果
+            if val_metrics:
+                f.write("\n验证集最终评估结果:\n")
+                f.write(f"- 整体MSE: {val_metrics.get('mse', 0):.4f}\n")
+                f.write(f"- 整体MAE: {val_metrics.get('mae', 0):.4f}\n")
+                f.write(f"- 整体准确率 (样本级): {val_metrics.get('overall_accuracy', 0):.4f}\n")
+                f.write("  (注: 只有当样本的两个维度都在容忍范围内时才算正确)\n\n")
                 
-                f.write(f"- 最佳训练损失: {best_train_loss:.4f}\n")
-                f.write(f"- 最佳验证损失: {best_val_loss:.4f}\n")
-                f.write(f"- 最佳验证准确率: {best_val_acc:.4f}\n")
+                f.write("Dynamics 表情维度:\n")
+                f.write(f"- MSE: {val_metrics.get('dynamics_mse', 0):.4f}\n")
+                f.write(f"- MAE: {val_metrics.get('dynamics_mae', 0):.4f}\n")
+                f.write(f"- 准确率: {val_metrics.get('dynamics_accuracy', 0):.4f}\n")
+                f.write(f"- 标准差: {val_metrics.get('dynamics_std', 0):.4f}\n")
+                f.write(f"- Pearson相关系数: {val_metrics.get('dynamics_pearson', 0):.4f}\n")
+                f.write(f"- Spearman相关系数: {val_metrics.get('dynamics_spearman', 0):.4f}\n\n")
+                
+                f.write("Synkinesis 表情维度:\n")
+                f.write(f"- MSE: {val_metrics.get('synkinesis_mse', 0):.4f}\n")
+                f.write(f"- MAE: {val_metrics.get('synkinesis_mae', 0):.4f}\n")
+                f.write(f"- 准确率: {val_metrics.get('synkinesis_accuracy', 0):.4f}\n")
+                f.write(f"- 标准差: {val_metrics.get('synkinesis_std', 0):.4f}\n")
+                f.write(f"- Pearson相关系数: {val_metrics.get('synkinesis_pearson', 0):.4f}\n")
+                f.write(f"- Spearman相关系数: {val_metrics.get('synkinesis_spearman', 0):.4f}\n\n")
+                
+                f.write("准确率计算说明:\n")
+                f.write("- 样本级准确率: 只有当样本的dynamics和synkinesis都在容忍范围内时，该样本才被认为是正确的\n")
+                f.write(f"- 容忍范围: ±{config.get('validation', {}).get('tolerance', 0.5)}\n")
+                f.write("- 这种计算方式更严格，更好地反映了模型的整体性能\n")
             
             f.write("\n模型架构:\n")
             f.write("- 光流模型: ResNet-18\n")
@@ -442,6 +507,12 @@ def generate_final_report(trainer, report_path, logger):
             f.write("2b. 关键点模型微调\n")
             f.write("3. 融合模型训练\n")
             f.write("4. 端到端微调\n")
+            
+            f.write("\n数据增强:\n")
+            f.write("- 使用同步数据增强确保模态间一致性\n")
+            f.write("- 几何变换: 水平翻转、旋转、缩放、平移\n")
+            f.write("- 图像颜色增强: 亮度、对比度、饱和度、色调\n")
+            f.write("- 关键点噪声增强: 高斯噪声模拟检测误差\n")
             
         logger.info(f"最终报告已保存: {report_path}")
         

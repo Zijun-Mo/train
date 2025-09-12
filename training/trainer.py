@@ -424,6 +424,10 @@ class FacialExpressionTrainer:
     
     def train_all_stages(self, train_loader: DataLoader, val_loader: DataLoader):
         """训练所有阶段"""
+        # 存储数据加载器以供后续使用
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        
         stages_config = self.config.training_config.get('stages', {})
         
         stage_order = [
